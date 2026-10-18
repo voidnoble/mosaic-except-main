@@ -36,6 +36,23 @@ class BYTETracker:
             tlwh, score, ema_alpha=self.ema_alpha, vote_to_lock=self.vote_to_lock
         )
 
+    def predict_only(self):
+        """검출 스킵 프레임용: 연관 없이 Kalman 예측만 수행.
+
+        검출을 건너뛴 프레임에서도 트랙 박스를 보간해 모자이크를 유지한다.
+        Lost 트랙의 만료(max_time_lost)는 벽시간 기준으로 계속 적용된다.
+        """
+        self.frame_id += 1
+        for t in self.tracked_tracks + self.lost_tracks:
+            t.predict()
+        # 오래 Lost된 트랙 제거
+        for t in self.lost_tracks:
+            if self.frame_id - t.end_frame > self.max_time_lost:
+                t.mark_removed()
+        self.lost_tracks = [t for t in self.lost_tracks
+                            if t.state == TrackState.Lost]
+        return self.tracked_tracks + self.lost_tracks
+
     def update(self, detections):
         """detections: [(tlwh(4,), score), ...] → 활성+Lost 트랙 리스트 반환."""
         self.frame_id += 1
