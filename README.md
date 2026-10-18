@@ -95,3 +95,40 @@
 
 ## Environment 
 - Python 3.8 
+
+---
+
+## Modernization: mosaic-except-main (2026-10)
+
+원본 MOFY 프로젝트의 현대화 작업. 영상에서 주인공(등록 인물)을 제외한 모든 인물의 얼굴을 모자이크 처리합니다.
+
+### 구성
+
+| 경로 | 내용 |
+|---|---|
+| `tracking/` | ByteTrack 기반 얼굴 트래킹 (Kalman 필터, IoU 2단계 매칭, 신원 투표, EMA 스무딩) — numpy 전용 |
+| `pipeline.py` | Phase 1 비디오 파이프라인: 검출 → 추적 → 신규 트랙만 인식 → 트랙 기반 모자이크 |
+| `prototype_scrfd_arcface.py` | Phase 2 프로토타입: SCRFD + ArcFace (InsightFace `buffalo_l`) 인식 파이프라인 |
+| `eval_baseline.py` | 기준선 측정 (합성 자가 검증 + 프레임별 CSV 메트릭) |
+| `pyproject.toml` / `Dockerfile` | Python 3.10+ 환경 |
+
+### 빠른 시작
+
+```bash
+pip install insightface onnxruntime opencv-python numpy
+
+# 1. 인물 DB 구축 (인물별 폴더 구조)
+python prototype_scrfd_arcface.py build-db --known_dir ./known --db face_db.npz
+
+# 2. 임계값 보정 (인물당 2장 이상 권장)
+python prototype_scrfd_arcface.py calibrate --known_dir ./known
+
+# 3. 이미지 / 비디오 처리
+python prototype_scrfd_arcface.py image --db face_db.npz --input in.jpg --output out.jpg
+python prototype_scrfd_arcface.py video --db face_db.npz --input in.mp4 --output out.mp4 --track
+```
+
+### 주의
+
+- InsightFace 사전학습 가중치는 비상업 연구용 라이선스입니다. 상용 서비스 전환 시 라이선스를 별도 검토하세요.
+- 모자이크(픽셀화)는 ML로 부분 복원될 수 있습니다. 완전한 비가역이 필요하면 솔리드 마스킹을 사용하세요.
