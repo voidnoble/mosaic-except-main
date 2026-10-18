@@ -25,6 +25,8 @@ from tracking import BYTETracker
 from tracking.track import TrackState
 from tracking.matching import iou_batch
 
+import anonymize
+import detectors
 import prototype_scrfd_arcface as proto
 
 
@@ -60,8 +62,9 @@ def match_tracks_faces(tracks, faces, iou_thresh=0.3):
 def process_video(args):
     providers = (["CUDAExecutionProvider", "CPUExecutionProvider"]
                  if args.providers == "cuda" else ["CPUExecutionProvider"])
-    app = proto.get_app(det_size=(args.det_size, args.det_size),
-                        providers=providers)
+    detector = detectors.make_detector(
+        args.detector, det_size=args.det_size, providers=providers,
+        model_path=detectors.YUNET_DEFAULT)
     names, db_embs = proto.load_db(args.db)
 
     cap = cv2.VideoCapture(args.input)
@@ -76,6 +79,7 @@ def process_video(args):
     tracker = BYTETracker(track_thresh=0.5, max_time_lost=30,
                           ema_alpha=0.6, vote_to_lock=3)
     prev_gray = None
+    track_lm = {}  # Phase 3: {track_id: 최신 랜드마크(106,2)} — 마스크 익명화용
     n_frames, t_all = 0, time.time()
     recog_calls, detect_calls = 0, 0
     ms = {"detect": 0.0, "track": 0.0, "recog": 0.0}
@@ -93,13 +97,15 @@ def process_video(args):
             if diff > args.scene_thresh:
                 tracker = BYTETracker(track_thresh=0.5, max_time_lost=30,
                                       ema_alpha=0.6, vote_to_lock=3)
+                track_lm.clear()  # 이전 장면의 랜드마크도 폐기
                 n_scene_cuts += 1
         prev_gray = gray
 
         if n_frames % args.skip == 0:
             # ---- 검출 프레임 ----
             t0 = time.time()
-            faces = app.get(img)
+            faces = detector.detect(img)
+            detector.embed(img, faces)  # YuNet: ArcFace rec 모델로 임베딩 추출
             ms["detect"] += (time.time() - t0) * 1000
             detect_calls += 1
 
@@ -116,6 +122,10 @@ def process_video(args):
                 f = id2face.get(t.track_id)
                 if f is None:
                     continue
+                # Phase 3: 트랙별 최신 랜드마크 보관 (마스크 기반 익명화용)
+                lm = getattr(f, "landmark_2d_106", None)
+                if lm is not None:
+                    track_lm[t.track_id] = np.asarray(lm, dtype=np.float32)
                 name, _ = proto.recognize_faces(
                     [f], names, db_embs, args.threshold,
                     min_det_score=args.min_det_score,
@@ -129,20 +139,22 @@ def process_video(args):
             tracks = tracker.predict_only()
             ms["track"] += (time.time() - t0) * 1000
 
-        # ---- 트랙 기반 모자이크 (Tracked + Lost, EMA 스무딩 박스) ----
-        boxes, draw_faces, results = [], [], []
+        # ---- Phase 3: 트랙 기반 마스크 익명화 (Tracked + Lost, EMA 스무딩 박스) ----
+        regions, draw_faces, results = [], [], []
         for t in tracks:
             if t.state not in (TrackState.Tracked, TrackState.Lost):
                 continue
             ident = t.identity or "unknown"  # 미확정 → fail-closed
             bb = tuple(t.render_tlbr)
             if ident == "unknown":
-                boxes.append(bb)
+                regions.append({"bbox": bb,
+                                "lm": track_lm.get(t.track_id)})
             draw_faces.append(type("F", (), {"bbox": np.array(bb)})())
             results.append((ident, 0.0))
 
-        out.write(proto.annotate(proto.mosaic(img, boxes), draw_faces,
-                                 results))
+        out_img = anonymize.anonymize(img, regions, region=args.mask_region,
+                                      mode=args.mask_mode)
+        out.write(proto.annotate(out_img, draw_faces, results))
         n_frames += 1
 
     cap.release()
@@ -171,10 +183,18 @@ def main():
     p.add_argument("--det-size", type=int, default=640,
                    help="SCRFD 검출 입력 크기 (클수록 작은 얼굴↑·느림)")
     p.add_argument("--providers", default="cpu", choices=["cpu", "cuda"])
+    p.add_argument("--detector", default="scrfd", choices=["scrfd", "yunet"],
+                   help="검출기 (Phase 3: yunet=모바일 경량 분기, CPU에서 ~19 FPS)")
     p.add_argument("--min-det-score", type=float, default=0.5)
     p.add_argument("--min-face-size", type=int, default=20)
     p.add_argument("--scene-thresh", type=float, default=40.0,
                    help="프레임 평균 밝기 차이 임계값 (초과 시 장면 전환으로 트래커 리셋)")
+    p.add_argument("--mask-region", default="head",
+                   choices=["bbox", "face", "head"],
+                   help="익명화 영역 (Phase 3: 랜드마크 마스크)")
+    p.add_argument("--mask-mode", default="pixelate",
+                   choices=["pixelate", "blur", "solid"],
+                   help="익명화 방식 (solid=검은색 채움이 가장 안전)")
     process_video(p.parse_args())
 
 
