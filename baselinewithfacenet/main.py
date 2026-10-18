@@ -123,8 +123,14 @@ def main(args):
     elif args['PROCESS_TARGET'] == 'Video':
         video_path = '../data/dest_images/kakao/song.mp4'
         #video_path = '../paddlevideo/mp4s/test.mp4'
-        fourcc = cv2.VideoWriter_fourcc(*'XVID')
-        out = cv2.VideoWriter(args['SAVE_DIR'] + '/output.mp4', fourcc, 24.0, (1280,720))
+        # Phase 1: 출력 규격을 원본에서 읽어옴 (기존 1280x720·XVID 고정 해제)
+        _probe = cv2.VideoCapture(video_path)
+        fps = _probe.get(cv2.CAP_PROP_FPS) or 24.0
+        w = int(_probe.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(_probe.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        _probe.release()
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(args['SAVE_DIR'] + '/output.mp4', fourcc, fps, (w, h))
 
         start = time()
         if args['DETECTOR'] == 'retinaface':
