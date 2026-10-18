@@ -203,4 +203,5 @@ def mtcnn_recognition(face_db, unknown_embeddings, recog_thr) :
         else : 
             face_ids.append('unknown')
         probs.append(result_probs)
-    return face_ids, result_probs
+    # Phase 1: 마지막 루프 값이 아닌 전체 확률 리스트 반환 (버그 수정)
+    return face_ids, probs

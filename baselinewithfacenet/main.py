@@ -69,8 +69,8 @@ def init(args):
 def ProcessImage(img, args, model_args):
     process_target = args['PROCESS_TARGET']
 
-    # Object Detection
-    bboxes = ML.Detection(img, args, model_args)
+    # Object Detection — Phase 1: (bboxes, scores) 반환
+    bboxes, _scores = ML.Detection(img, args, model_args)
     if bboxes is None:
         if args['DETECTOR'] == 'mtcnn':
             if process_target == 'Video': # torchvision

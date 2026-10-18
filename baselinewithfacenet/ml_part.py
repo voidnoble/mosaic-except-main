@@ -5,15 +5,17 @@ from detection import mtcnn_detection, mtcnn_get_embeddings, mtcnn_recognition, 
 from retinaface_utils.util import retinaface_detection
 
 def Detection(img, args, model_args):
-    # return bboxes position
+    # return (bboxes, scores) — Phase 1: ByteTrack 2단계 매칭용 신뢰도 포함
+    # mtcnn 분기는 점수를 주지 않으므로 scores=None
 
     # ======== ML Part ============
     device = model_args['Device']
 
+    scores = None
     if args['DETECTOR'] == 'mtcnn':
         bboxes = mtcnn_detection(model_args['Detection'], img, device)
     else:
-        bboxes = retinaface_detection(model_args['Detection'], img, device)
+        bboxes, scores = retinaface_detection(model_args['Detection'], img, device)
 
     if args['DEBUG_MODE']:
         print(bboxes)
@@ -22,7 +24,7 @@ def Detection(img, args, model_args):
         bboxes = Get_normal_bbox(img.shape, bboxes)
     # =============================
 
-    return bboxes
+    return bboxes, scores
 
 
 def Recognition(img, bboxes, args, model_args):

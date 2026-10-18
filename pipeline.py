@@ -28,17 +28,15 @@ from util import Mosaic, DrawRectImg
 
 
 def detect_with_scores(img_det, args, model_args):
-    """기존 Detection + 신뢰도 반환.
+    """ML.Detection 래퍼 → [(tlwh, score)].
 
-    retinaface: util.py 수정 후 (bboxes, scores) 반환.
-    mtcnn: 점수를 주지 않으므로 0.99로 둠 (전부 high-conf로 취급).
+    retinaface: (bboxes, scores) 반환. mtcnn: 점수가 없어 0.99로 둠
+    (전부 high-conf로 취급 — mtcnn 분기는 2단계 매칭 이득이 작음).
     """
-    bboxes = ML.Detection(img_det, args, model_args)
+    bboxes, scores = ML.Detection(img_det, args, model_args)
     if bboxes is None or len(bboxes) == 0:
         return []
-    if isinstance(bboxes, tuple):  # (bboxes, scores) — 수정된 retinaface
-        bboxes, scores = bboxes
-    else:
+    if scores is None:
         scores = np.full(len(bboxes), 0.99, dtype=np.float32)
     dets = []
     for (x1, y1, x2, y2), s in zip(bboxes, scores):

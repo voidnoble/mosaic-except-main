@@ -89,4 +89,5 @@ def retinaface_postprocess(loc, conf, landms, scale, resize, img_shape, device):
     # landms = landms[:args.keep_top_k, :]
     
     # dets = np.concatenate((dets, landms), axis=1)
-    return dets[:, :4]
+    # Phase 1: ByteTrack 2단계 매칭에 검출 신뢰도가 필요하므로 score도 함께 반환
+    return dets[:, :4], dets[:, 4]
