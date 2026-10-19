@@ -38,7 +38,23 @@
 | Phase 3 YuNet (`--skip 2`, bbox+solid) | 4.0 | 약 3배 |
 | Phase 3 SCRFD (`--skip 6`, head+pixelate) | ~2.4 | 마스크 오버헤드 미미 |
 
-## 남은 작업 (Phase 3 stretch)
-- SAM 2 / 얼굴 파싱 기반 정밀 마스크 (현재는 랜드마크 폴리곤)
-- WebRTC/RTMP 입력 (현재는 WebSocket JPEG 스트림)
-- 모바일 온디바이스 배포 패키징 (TFLite/ONNX Mobile)
+## 남은 작업 (Phase 3 stretch) — 2026-10-19 구현 완료
+- [x] SAM 2 정밀 마스크 (`sam2_mask.py`, `pipeline_v2 --mask-region sam2`)
+  - sam2.1_hiera_tiny 체크포인트, 박스 프롬프트 → 얼굴 윤곽 정밀 분할
+  - CPU 5.8초/마스크 (GPU 권장), 5프레임 E2E 검증 완료 (0.3 FPS CPU)
+- [x] WebRTC 실시간 스트림 (`server.py` POST `/webrtc/offer`, aiortc)
+  - 시그널링 검증 통과 (offer→answer 200, 유효 SDP+candidate)
+  - 처리 경로 검증 통과 (6프레임 익명화, 평균 차이 5.3)
+  - 환경 제한: 이 VM 샌드박스는 UDP를 차단하므로 실제 미디어 루프백 불가
+    (32비트 실행 차단과 같은 샌드박스 정책). GPU/일반 환경에서는 동작.
+- [x] RTMP 송출 (`stream_out.py`, `pipeline_v2 --output rtmp://...`)
+  - ffmpeg 파이프 → libx264 → flv, 로컬 ffmpeg 리스너로 E2E 검증
+    (수신 FLV에서 6명 전원 solid 마스크 확인)
+- [x] 온디바이스 패키징 (`mobile/`)
+  - `infer.py`: onnxruntime-only (YuNet 검출 + ArcFace 임베딩, Umeyama 정렬)
+  - insightface 대비 임베딩 코사인 유사도 평균 0.97 (6명)
+  - `build.py`: 모델+DB+스크립트를 `mofy-mobile.zip`(160MB)으로 패키징
+  - 의존성: onnxruntime, opencv-python-headless, numpy만
+
+## 아직 열린 항목 (GPU/GT 필요)
+- AdaFace 백본 옵션, ONNX FP16/TensorRT, AI-Hub GT 기반 recall/false-match 측정

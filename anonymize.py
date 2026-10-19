@@ -64,6 +64,43 @@ def region_mask(shape, polys, feather=0):
     return (mask.astype(np.float32) / 255.0)[..., None]
 
 
+def anonymize(img, regions, region="head", mode="pixelate", n=12,
+              feather=3):
+    """regions: [{"bbox": (x1,y1,x2,y2), "lm": (106,2) or None,
+                  "mask": (H,W) bool or None}, ...]
+    "mask"가 있으면 최우선 사용 (SAM 2 정밀 마스크).
+    랜드마크가 없으면 bbox로 폴백."""
+    masks, polys = [], []
+    for r in regions:
+        m = r.get("mask")
+        if m is not None:
+            masks.append(m)
+            continue
+        lm = r.get("lm")
+        if region == "bbox" or lm is None:
+            polys.append(_bbox_poly(r["bbox"]))
+        elif region == "face":
+            polys.append(face_polygon(lm))
+        else:  # head (sam2는 mask 경로이므로 여기로 오지 않음)
+            polys.append(head_polygon(lm))
+    if masks:
+        m = np.zeros(img.shape[:2], dtype=np.float32)
+        for mm in masks:
+            mh, mw = mm.shape[:2]
+            hh, ww = m.shape[:2]
+            if (mh, mw) != (hh, ww):
+                mm = cv2.resize(mm.astype(np.uint8), (ww, hh)) > 0
+            m = np.maximum(m, mm.astype(np.float32))
+        if feather > 0:
+            m = cv2.GaussianBlur(m, (0, 0), feather)
+        mask = m[..., None]
+    elif polys:
+        mask = region_mask(img.shape, polys, feather=feather)
+    else:
+        return img
+    return apply_effect(img, mask, mode, n=n)
+
+
 def pixelate_roi(roi, n=12):
     h, w = roi.shape[:2]
     if h < n or w < n:
@@ -92,22 +129,3 @@ def apply_effect(img, mask, mode, n=12, blur_ksize=51):
             eff[y1:y2, x1:x2] = pixelate_roi(roi, n)
     blended = eff.astype(np.float32) * mask + out * (1.0 - mask)
     return blended.astype(np.uint8)
-
-
-def anonymize(img, regions, region="head", mode="pixelate", n=12,
-              feather=3):
-    """regions: [{"bbox": (x1,y1,x2,y2), "lm": (106,2) or None}, ...]
-    랜드마크가 없으면 bbox로 폴백."""
-    polys = []
-    for r in regions:
-        lm = r.get("lm")
-        if region == "bbox" or lm is None:
-            polys.append(_bbox_poly(r["bbox"]))
-        elif region == "face":
-            polys.append(face_polygon(lm))
-        else:  # head
-            polys.append(head_polygon(lm))
-    if not polys:
-        return img
-    mask = region_mask(img.shape, polys, feather=feather)
-    return apply_effect(img, mask, mode, n=n)

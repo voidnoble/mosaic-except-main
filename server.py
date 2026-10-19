@@ -14,6 +14,7 @@
   # ws 클라이언트: test_ws_client.py 참고
 """
 import argparse
+import asyncio
 import io
 import os
 import sys
@@ -185,6 +186,62 @@ async def ws_process(ws: WebSocket):
             await ws.close()
         except Exception:
             pass
+
+
+# ---------------- WebRTC: 실시간 스트림 처리 ----------------
+# POST /webrtc/offer {sdp, type} → {sdp, type} (answer)
+# 클라이언트가 보낸 비디오를 프레임 단위로 익명화 처리해 되돌려 보낸다.
+_pcs = set()
+
+
+def _make_webrtc():
+    from aiortc import RTCPeerConnection, RTCSessionDescription
+    from aiortc import VideoStreamTrack
+    from av import VideoFrame
+    return RTCPeerConnection, RTCSessionDescription, VideoStreamTrack, \
+        VideoFrame
+
+
+@app.post("/webrtc/offer")
+async def webrtc_offer(params: dict):
+    RTCPeerConnection, RTCSessionDescription, VideoStreamTrack, \
+        VideoFrame = _make_webrtc()
+    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+    pc = RTCPeerConnection()
+    _pcs.add(pc)
+    tracker = BYTETracker(track_thresh=0.5, max_time_lost=30,
+                          ema_alpha=0.6, vote_to_lock=3)
+    track_lm = {}
+
+    class ProcessedTrack(VideoStreamTrack):
+        async def recv(self):
+            frame = await self._src.recv()
+            img = frame.to_ndarray(format="bgr24")
+            out = process_frame(img, tracker, track_lm)
+            new = VideoFrame.from_ndarray(out, format="bgr24")
+            new.pts, new.time_base = frame.pts, frame.time_base
+            return new
+
+    @pc.on("track")
+    def on_track(track):
+        if track.kind == "video":
+            pt = ProcessedTrack()
+            pt._src = track
+            pc.addTrack(pt)
+
+    @pc.on("connectionstatechange")
+    async def on_state():
+        if pc.connectionState in ("failed", "closed"):
+            _pcs.discard(pc)
+            await pc.close()
+
+    await pc.setRemoteDescription(offer)
+    answer = await pc.createAnswer()
+    await pc.setLocalDescription(answer)
+    # trickle ICE 없이 한 번에 교환하므로 gathering 완료까지 대기
+    while pc.iceGatheringState != "complete":
+        await asyncio.sleep(0.1)
+    return {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
 
 
 # ---------------- 등록 UI ----------------

@@ -15,3 +15,5 @@ baselinewithfacenet/saved/*
 *.jpeg
 *.png
 .env
+.local/
+models/sam2.1_hiera_*.pt

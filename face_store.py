@@ -91,10 +91,11 @@ class FaceStore:
 
     @classmethod
     def from_npz(cls, path):
-        """Phase 2 proto.build_db 산출 npz와 호환 (names/embs)."""
+        """Phase 2 proto.build_db 산출 npz와 호환 (names/embeddings 또는 names/embs)."""
         d = np.load(path, allow_pickle=True)
-        store = cls(dim=d["embs"].shape[1])
+        key = "embeddings" if "embeddings" in d else "embs"
+        store = cls(dim=d[key].shape[1])
         store.names = [str(n) for n in d["names"]]
-        store.embs = _normalize(d["embs"].astype(np.float32))
+        store.embs = _normalize(d[key].astype(np.float32))
         store._rebuild()
         return store

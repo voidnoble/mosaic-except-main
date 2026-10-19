@@ -28,6 +28,7 @@ from tracking.matching import iou_batch
 import anonymize
 import detectors
 import prototype_scrfd_arcface as proto
+from stream_out import make_writer
 
 
 def to_dets(faces):
@@ -73,13 +74,21 @@ def process_video(args):
     fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    out = cv2.VideoWriter(args.output, cv2.VideoWriter_fourcc(*"mp4v"),
-                          fps, (w, h))
+    # Phase 3 stretch: rtmp:// 출력이면 RTMP 실시간 송출
+    out = make_writer(args.output, fps, w, h)
 
     tracker = BYTETracker(track_thresh=0.5, max_time_lost=30,
                           ema_alpha=0.6, vote_to_lock=3)
     prev_gray = None
     track_lm = {}  # Phase 3: {track_id: 최신 랜드마크(106,2)} — 마스크 익명화용
+    track_masks = {}  # Phase 3 stretch: {track_id: SAM2 마스크(H,W) bool}
+    sam2seg = None
+    if args.mask_region == "sam2":
+        import sam2_mask
+        ckpt = sam2_mask.download_checkpoint("tiny", "models/")
+        cfg = sam2_mask.CONFIGS["tiny"][0]
+        sam2seg = sam2_mask.SAM2Segmenter(ckpt, cfg)
+        print("SAM 2 마스크 모드 (tiny, CPU)")
     n_frames, t_all = 0, time.time()
     recog_calls, detect_calls = 0, 0
     ms = {"detect": 0.0, "track": 0.0, "recog": 0.0}
@@ -88,6 +97,8 @@ def process_video(args):
     while True:
         ret, img = cap.read()
         if not ret:
+            break
+        if args.max_frames and n_frames >= args.max_frames:
             break
 
         # ---- 장면 전환 감지: 이전 장면의 Lost 트랙이 새 장면을 오염시키지 않도록 리셋
@@ -98,6 +109,7 @@ def process_video(args):
                 tracker = BYTETracker(track_thresh=0.5, max_time_lost=30,
                                       ema_alpha=0.6, vote_to_lock=3)
                 track_lm.clear()  # 이전 장면의 랜드마크도 폐기
+                track_masks.clear()  # SAM2 마스크도 폐기
                 n_scene_cuts += 1
         prev_gray = gray
 
@@ -133,6 +145,23 @@ def process_video(args):
                 t.vote(name)
                 recog_calls += 1
             ms["recog"] += (time.time() - t0) * 1000
+
+            # Phase 3 stretch: SAM2 정밀 마스크 (검출 프레임의 unknown 얼굴)
+            if sam2seg is not None:
+                rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                for t in tracks:
+                    if t.state != TrackState.Tracked:
+                        continue
+                    if (t.identity or "unknown") != "unknown":
+                        continue
+                    f = id2face.get(t.track_id)
+                    if f is None:
+                        continue
+                    try:
+                        track_masks[t.track_id] = sam2seg.mask_for_box(
+                            rgb, tuple(f.bbox))
+                    except Exception:
+                        pass
         else:
             # ---- 스킵 프레임: Kalman 예측 보간 ----
             t0 = time.time()
@@ -148,7 +177,8 @@ def process_video(args):
             bb = tuple(t.render_tlbr)
             if ident == "unknown":
                 regions.append({"bbox": bb,
-                                "lm": track_lm.get(t.track_id)})
+                                "lm": track_lm.get(t.track_id),
+                                "mask": track_masks.get(t.track_id)})
             draw_faces.append(type("F", (), {"bbox": np.array(bb)})())
             results.append((ident, 0.0))
 
@@ -175,7 +205,8 @@ def main():
     p = argparse.ArgumentParser(description="MOFY Phase 2 통합 파이프라인")
     p.add_argument("--db", required=True)
     p.add_argument("--input", required=True)
-    p.add_argument("--output", default="out_v2.mp4")
+    p.add_argument("--output", default="out_v2.mp4",
+                   help="출력 파일 또는 rtmp:// URL (RTMP 실시간 송출)")
     p.add_argument("--threshold", type=float, default=0.4,
                    help="코사인 유사도 임계값 (calibrate 권장값)")
     p.add_argument("--skip", type=int, default=3,
@@ -189,9 +220,12 @@ def main():
     p.add_argument("--min-face-size", type=int, default=20)
     p.add_argument("--scene-thresh", type=float, default=40.0,
                    help="프레임 평균 밝기 차이 임계값 (초과 시 장면 전환으로 트래커 리셋)")
+    p.add_argument("--max-frames", type=int, default=0,
+                   help="처리할 최대 프레임 수 (0=전체, 테스트용)")
     p.add_argument("--mask-region", default="head",
-                   choices=["bbox", "face", "head"],
-                   help="익명화 영역 (Phase 3: 랜드마크 마스크)")
+                   choices=["bbox", "face", "head", "sam2"],
+                   help="익명화 영역 (Phase 3: 랜드마크 마스크, "
+                        "sam2=SAM 2 정밀 마스크)")
     p.add_argument("--mask-mode", default="pixelate",
                    choices=["pixelate", "blur", "solid"],
                    help="익명화 방식 (solid=검은색 채움이 가장 안전)")
