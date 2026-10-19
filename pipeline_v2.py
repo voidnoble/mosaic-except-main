@@ -66,6 +66,18 @@ def process_video(args):
     detector = detectors.make_detector(
         args.detector, det_size=args.det_size, providers=providers,
         model_path=detectors.YUNET_DEFAULT)
+    if args.rec_model == "adaface":
+        import rec_models
+        ckpt = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "models", "adaface_ir_101.onnx")
+        if not os.path.exists(ckpt):
+            raise FileNotFoundError(
+                f"AdaFace 가중치 없음: {ckpt} "
+                "(https://github.com/yakhyo/adaface-onnx)")
+        # SCRFDDetector: app.models 교체 / YuNetDetector: 내부 app 교체
+        rec_models.swap_recognition_model(detector.app, ckpt,
+                                          providers=providers)
+        print("인식 백본: AdaFace IR-101 (DB도 AdaFace로 구축 필요)")
     names, db_embs = proto.load_db(args.db)
 
     cap = cv2.VideoCapture(args.input)
@@ -216,6 +228,9 @@ def main():
     p.add_argument("--providers", default="cpu", choices=["cpu", "cuda"])
     p.add_argument("--detector", default="scrfd", choices=["scrfd", "yunet"],
                    help="검출기 (Phase 3: yunet=모바일 경량 분기, CPU에서 ~19 FPS)")
+    p.add_argument("--rec-model", default="arcface",
+                   choices=["arcface", "adaface"],
+                   help="인식 백본 (adaface=저품질 강건, DB도 해당 백본으로 구축)")
     p.add_argument("--min-det-score", type=float, default=0.5)
     p.add_argument("--min-face-size", type=int, default=20)
     p.add_argument("--scene-thresh", type=float, default=40.0,

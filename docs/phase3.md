@@ -57,4 +57,17 @@
   - 의존성: onnxruntime, opencv-python-headless, numpy만
 
 ## 아직 열린 항목 (GPU/GT 필요)
-- AdaFace 백본 옵션, ONNX FP16/TensorRT, AI-Hub GT 기반 recall/false-match 측정
+- [x] AdaFace 백본 옵션 (`rec_models.py`, `--rec-model adaface`)
+  - IR-101@MS1MV2 ONNX (yakhyo/adaface-onnx, 248MB, MIT)
+  - `prototype_scrfd_arcface.py build-db --rec-model adaface`,
+    `pipeline_v2.py --rec-model adaface` (DB는 백본별 분리 필요)
+  - 평가 (`eval_recall.py`, CPU): verification 100.0% (n=91),
+    TAR@FAR=1% 100.0%, genuine 0.949/impostor 0.086
+  - ArcFace와 동등 (0.943/0.086) — 이 테스트셋은 고화질이라 차이 없음.
+    AdaFace의 강점은 감시급 저화질에서 발현 (논문 주장)
+- [ ] ONNX FP16/TensorRT — **진행 불가**: 이 VM에 NVIDIA GPU 없음
+  (onnxruntime providers: CPU만). GPU 환경에서 `trtexec` 변환 필요.
+- [ ] AI-Hub GT 기반 recall/false-match — **진행 불가**: AI-Hub는 회원
+  가입·이용 승인 필요, LFW 원본 서버(UMass)도 이 환경에서 차단.
+  대신 `eval_recall.py`로 동등 지표 측정 (증강 genuine/impostor 분포 +
+  열화 강건성). AI-Hub 접근권 확보되면 동일 스크립트에 GT 로더만 추가.

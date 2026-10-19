@@ -53,7 +53,6 @@ class YuNetDetector:
                  providers=None):
         # rec 모델은 임베딩 추출용으로만 로드 (검출은 YuNet)
         self.app = proto.get_app(det_size=(320, 320), providers=providers)
-        self.rec = self.app.models["recognition"]
         from insightface.app.common import Face as IFFace
         self._IFFace = IFFace
         self.model_path = model_path
@@ -82,13 +81,14 @@ class YuNetDetector:
         return out
 
     def embed(self, img, faces):
+        rec = self.app.models["recognition"]  # 동적 조회 (백본 교체 대응)
         for f in faces:
             if f.embedding is not None or f.kps is None:
                 continue
             iff = self._IFFace(bbox=f.bbox, kps=f.kps,
                                det_score=f.det_score)
             try:
-                self.rec.get(img, iff)
+                rec.get(img, iff)
                 f.embedding = iff.embedding
             except Exception:
                 f.embedding = None

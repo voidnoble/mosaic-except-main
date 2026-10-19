@@ -274,6 +274,9 @@ def main():
     b = sub.add_parser("build-db")
     b.add_argument("--known_dir", required=True)
     b.add_argument("--db", default="face_db.npz")
+    b.add_argument("--rec-model", default="arcface",
+                   choices=["arcface", "adaface"],
+                   help="AdaFace 가중치 필요: models/adaface_ir_101.onnx")
     c = sub.add_parser("calibrate")
     c.add_argument("--known_dir", required=True)
     i = sub.add_parser("image")
@@ -290,6 +293,12 @@ def main():
     ns = p.parse_args()
 
     app = get_app()
+    if getattr(ns, "rec_model", "arcface") == "adaface":
+        import rec_models
+        ckpt = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "models", "adaface_ir_101.onnx")
+        rec_models.swap_recognition_model(app, ckpt)
+        print("인식 백본: AdaFace IR-101")
     if ns.cmd == "build-db":
         build_db(app, ns.known_dir, ns.db)
     elif ns.cmd == "calibrate":

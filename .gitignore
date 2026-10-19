@@ -17,3 +17,4 @@ baselinewithfacenet/saved/*
 .env
 .local/
 models/sam2.1_hiera_*.pt
+models/adaface_ir_101.onnx
